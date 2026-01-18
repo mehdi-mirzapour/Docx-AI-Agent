@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import './App.css'
+
+const API_BASE = 'http://localhost:8787/api'
 
 function App() {
     const [suggestions, setSuggestions] = useState([])
@@ -7,6 +9,18 @@ function App() {
     const [selectedSuggestions, setSelectedSuggestions] = useState(new Set())
     const [downloadUrl, setDownloadUrl] = useState(null)
     const [status, setStatus] = useState('idle')
+
+    // Standalone mode state
+    const [isStandalone, setIsStandalone] = useState(false)
+    const [file, setFile] = useState(null)
+    const [editRequest, setEditRequest] = useState('')
+    const [uploading, setUploading] = useState(false)
+    const [analyzing, setAnalyzing] = useState(false)
+
+    // Detect if running in standalone mode (no ChatGPT)
+    useEffect(() => {
+        setIsStandalone(!window.openai)
+    }, [])
 
     // Initialize from ChatGPT's toolOutput
     useEffect(() => {
@@ -43,6 +57,58 @@ function App() {
         }
     }, [])
 
+    // Standalone mode: Upload file
+    const handleFileUpload = async () => {
+        if (!file || !editRequest) {
+            alert('Please select a file and enter an edit request')
+            return
+        }
+
+        setUploading(true)
+        const formData = new FormData()
+        formData.append('file', file)
+
+        try {
+            // Upload document
+            const uploadRes = await fetch(`${API_BASE}/upload`, {
+                method: 'POST',
+                body: formData,
+            })
+            const uploadData = await uploadRes.json()
+
+            if (!uploadRes.ok) {
+                throw new Error(uploadData.error || 'Upload failed')
+            }
+
+            setDocId(uploadData.doc_id)
+            setUploading(false)
+            setAnalyzing(true)
+
+            // Analyze document
+            const analyzeRes = await fetch(`${API_BASE}/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    doc_id: uploadData.doc_id,
+                    request: editRequest,
+                }),
+            })
+            const analyzeData = await analyzeRes.json()
+
+            if (!analyzeRes.ok) {
+                throw new Error(analyzeData.error || 'Analysis failed')
+            }
+
+            setSuggestions(analyzeData.suggestions)
+            setAnalyzing(false)
+        } catch (error) {
+            console.error('Error:', error)
+            alert(`Error: ${error.message}`)
+            setUploading(false)
+            setAnalyzing(false)
+        }
+    }
+
     const toggleSuggestion = (suggestionId) => {
         setSelectedSuggestions((prev) => {
             const newSet = new Set(prev)
@@ -60,20 +126,46 @@ function App() {
 
         setStatus('applying')
 
-        if (window.openai?.callTool) {
+        // Standalone mode: Use REST API
+        if (isStandalone) {
             try {
-                const response = await window.openai.callTool('apply_changes', {
-                    doc_id: docId,
-                    suggestion_ids: Array.from(selectedSuggestions),
+                const response = await fetch(`${API_BASE}/apply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        doc_id: docId,
+                        suggestion_ids: Array.from(selectedSuggestions),
+                    }),
                 })
+                const data = await response.json()
 
-                if (response?.structuredContent?.download_url) {
-                    setDownloadUrl(response.structuredContent.download_url)
-                    setStatus('completed')
+                if (!response.ok) {
+                    throw new Error(data.error || 'Apply failed')
                 }
+
+                setDownloadUrl(`http://localhost:8787${data.download_url}`)
+                setStatus('completed')
             } catch (error) {
                 console.error('Error applying changes:', error)
                 setStatus('error')
+            }
+        } else {
+            // ChatGPT mode: Use MCP tool
+            if (window.openai?.callTool) {
+                try {
+                    const response = await window.openai.callTool('apply_changes', {
+                        doc_id: docId,
+                        suggestion_ids: Array.from(selectedSuggestions),
+                    })
+
+                    if (response?.structuredContent?.download_url) {
+                        setDownloadUrl(response.structuredContent.download_url)
+                        setStatus('completed')
+                    }
+                } catch (error) {
+                    console.error('Error applying changes:', error)
+                    setStatus('error')
+                }
             }
         }
     }
@@ -83,10 +175,41 @@ function App() {
             <div className="container">
                 <div className="empty-state">
                     <h2>📄 Document Editor</h2>
-                    <p>Upload a Word document and ask ChatGPT to suggest edits!</p>
-                    <p className="hint">
-                        Try: "Make this document more formal" or "Fix grammar issues"
-                    </p>
+
+                    {isStandalone ? (
+                        <>
+                            <p>Upload a Word document and request edits</p>
+                            <div className="upload-form">
+                                <input
+                                    type="file"
+                                    accept=".docx"
+                                    onChange={(e) => setFile(e.target.files[0])}
+                                    className="file-input"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="Enter edit request (e.g., 'make it more formal')"
+                                    value={editRequest}
+                                    onChange={(e) => setEditRequest(e.target.value)}
+                                    className="text-input"
+                                />
+                                <button
+                                    onClick={handleFileUpload}
+                                    disabled={!file || !editRequest || uploading || analyzing}
+                                    className="btn-primary"
+                                >
+                                    {uploading ? 'Uploading...' : analyzing ? 'Analyzing...' : 'Upload & Analyze'}
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <p>Upload a Word document and ask ChatGPT to suggest edits!</p>
+                            <p className="hint">
+                                Try: "Make this document more formal" or "Fix grammar issues"
+                            </p>
+                        </>
+                    )}
                 </div>
             </div>
         )
@@ -171,3 +294,4 @@ function App() {
 }
 
 export default App
+

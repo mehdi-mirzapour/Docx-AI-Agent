@@ -332,9 +332,122 @@ async def handle_messages(scope, receive, send):
 async def handle_root(request):
     return JSONResponse({"status": "healthy", "message": "MCP Server is running"})
 
+# REST API endpoints for standalone testing
+from starlette.requests import Request
+from starlette.responses import FileResponse
+
+async def handle_upload(request: Request):
+    """REST endpoint to upload a document."""
+    form = await request.form()
+    file = form.get("file")
+    
+    if not file:
+        return JSONResponse({"error": "No file provided"}, status_code=400)
+    
+    # Read file content
+    content = await file.read()
+    filename = file.filename
+    
+    # Create doc_id and save
+    doc_id = str(uuid.uuid4())
+    doc_path = UPLOAD_DIR / f"{doc_id}.docx"
+    
+    with open(doc_path, "wb") as f:
+        f.write(content)
+    
+    # Extract metadata
+    metadata = extract_document_metadata(str(doc_path))
+    
+    # Store document info
+    documents[doc_id] = {
+        "filename": filename,
+        "path": str(doc_path),
+        "metadata": metadata,
+    }
+    
+    return JSONResponse({
+        "doc_id": doc_id,
+        "filename": filename,
+        "metadata": metadata
+    })
+
+async def handle_analyze(request: Request):
+    """REST endpoint to analyze document and get suggestions."""
+    data = await request.json()
+    doc_id = data.get("doc_id")
+    edit_request = data.get("request")
+    
+    if not doc_id or not edit_request:
+        return JSONResponse({"error": "Missing doc_id or request"}, status_code=400)
+    
+    if doc_id not in documents:
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+    
+    doc_path = documents[doc_id]["path"]
+    suggestions = generate_suggestions(doc_path, edit_request)
+    
+    # Store suggestions
+    suggestions_store[doc_id] = suggestions
+    
+    return JSONResponse({
+        "doc_id": doc_id,
+        "suggestions": suggestions,
+        "count": len(suggestions)
+    })
+
+async def handle_apply(request: Request):
+    """REST endpoint to apply selected suggestions."""
+    data = await request.json()
+    doc_id = data.get("doc_id")
+    suggestion_ids = data.get("suggestion_ids", [])
+    
+    if not doc_id:
+        return JSONResponse({"error": "Missing doc_id"}, status_code=400)
+    
+    if doc_id not in documents or doc_id not in suggestions_store:
+        return JSONResponse({"error": "Document or suggestions not found"}, status_code=404)
+    
+    # Get selected suggestions
+    all_suggestions = suggestions_store[doc_id]
+    selected = [s for s in all_suggestions if s["id"] in suggestion_ids]
+    
+    if not selected:
+        return JSONResponse({"error": "No valid suggestions selected"}, status_code=400)
+    
+    # Apply changes
+    doc_path = documents[doc_id]["path"]
+    modified_path = apply_changes_to_document(doc_path, selected)
+    
+    # Store modified document path
+    documents[doc_id]["modified_path"] = modified_path
+    
+    return JSONResponse({
+        "success": True,
+        "applied_count": len(selected),
+        "download_url": f"/api/download/{os.path.basename(modified_path)}"
+    })
+
+async def handle_download(request: Request):
+    """REST endpoint to download modified document."""
+    filename = request.path_params.get("filename")
+    file_path = UPLOAD_DIR / filename
+    
+    if not file_path.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
 # Define routes
 routes = [
     Route("/", handle_root),
+    Route("/api/upload", handle_upload, methods=["POST"]),
+    Route("/api/analyze", handle_analyze, methods=["POST"]),
+    Route("/api/apply", handle_apply, methods=["POST"]),
+    Route("/api/download/{filename}", handle_download, methods=["GET"]),
     Mount("/sse/messages", app=handle_messages),
     Mount("/sse", app=handle_sse),
 ]

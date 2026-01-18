@@ -210,3 +210,7 @@ __marimo__/
 node_modules/
 .vite/
 dist/
+
+.DS_Store
+uploads/
+backend/uploads/
