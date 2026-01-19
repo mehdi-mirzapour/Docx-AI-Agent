@@ -26,9 +26,11 @@ function App() {
     // Initialize from ChatGPT's toolOutput
     useEffect(() => {
         const initialData = window.openai?.toolOutput
+        if (initialData?.doc_id) {
+            setDocId(initialData.doc_id)
+        }
         if (initialData?.suggestions) {
             setSuggestions(initialData.suggestions)
-            setDocId(initialData.doc_id)
         }
     }, [])
 
@@ -38,9 +40,12 @@ function App() {
             const globals = event.detail?.globals
             if (!globals?.toolOutput) return
 
+            if (globals.toolOutput.doc_id) {
+                setDocId(globals.toolOutput.doc_id)
+            }
+
             if (globals.toolOutput.suggestions) {
                 setSuggestions(globals.toolOutput.suggestions)
-                setDocId(globals.toolOutput.doc_id)
             }
 
             if (globals.toolOutput.download_url) {
@@ -57,6 +62,44 @@ function App() {
             window.removeEventListener('openai:set_globals', handleSetGlobals)
         }
     }, [])
+
+    // ... (handleFileUpload code omitted for brevity, keeping existing) ...
+
+    // ... (handleApplyChanges code omitted for brevity) ...
+
+    if (suggestions.length === 0) {
+        return (
+            <div className="container">
+                <div className="empty-state">
+                    <h2>📄 Document Editor</h2>
+
+                    {isStandalone ? (
+                        <>
+                            {/* Standalone upload form... kept via context matching if I just replace component body? No, too large. */}
+                            {/* I will only replace the ChatGPT mode block below if I can match securely. */}
+                            {/* Actually, I am replacing the whole useEffect block. */}
+                        </>
+                    ) : (
+                        docId ? (
+                            <div className="waiting-state">
+                                <p className="success">✅ Document Uploaded!</p>
+                                <p>To proceed, please tell ChatGPT:</p>
+                                <p className="prompt-suggestion">"Analyze this document and suggest improvements"</p>
+                                <p className="hint">This will trigger the analysis tool and populate this view.</p>
+                            </div>
+                        ) : (
+                            <>
+                                <p>Upload a Word document and ask ChatGPT to suggest edits!</p>
+                                <p className="hint">
+                                    Try: "Make this document more formal" or "Fix grammar issues"
+                                </p>
+                            </>
+                        )
+                    )}
+                </div>
+            </div>
+        )
+    }
 
     // Standalone mode: Upload file
     const handleFileUpload = async () => {
@@ -248,12 +291,30 @@ function App() {
                             </div>
                         </>
                     ) : (
-                        <>
-                            <p>Upload a Word document and ask ChatGPT to suggest edits!</p>
-                            <p className="hint">
-                                Try: "Make this document more formal" or "Fix grammar issues"
-                            </p>
-                        </>
+                        docId ? (
+                            <div className="waiting-state" style={{ textAlign: 'center' }}>
+                                <p style={{ color: '#10b981', fontWeight: 'bold', fontSize: '1.1rem' }}>✅ Document Uploaded!</p>
+                                <p>To proceed, please tell ChatGPT:</p>
+                                <div style={{
+                                    background: '#f3f4f6',
+                                    padding: '12px',
+                                    borderRadius: '8px',
+                                    margin: '12px 0',
+                                    fontFamily: 'monospace',
+                                    fontWeight: '600'
+                                }}>
+                                    "Analyze this document and suggest improvements"
+                                </div>
+                                <p className="hint">This will trigger the analysis tool and populate this view.</p>
+                            </div>
+                        ) : (
+                            <>
+                                <p>Upload a Word document and ask ChatGPT to suggest edits!</p>
+                                <p className="hint">
+                                    Try: "Make this document more formal" or "Fix grammar issues"
+                                </p>
+                            </>
+                        )
                     )}
                 </div>
             </div>

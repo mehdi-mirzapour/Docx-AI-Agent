@@ -2,13 +2,21 @@ import asyncio
 import base64
 import os
 import uuid
+import logging
 from pathlib import Path
 from typing import Any
+
+import logging
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("server")
 
 from docx import Document
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Resource, Tool, TextContent
+from mcp.types import Resource, Tool, TextContent, Prompt, ResourceTemplate
+from pydantic import AnyUrl
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -240,6 +248,18 @@ async def list_resources() -> list[Resource]:
         )
     ]
 
+@app.read_resource()
+async def read_resource(uri: AnyUrl) -> str:
+    """Read resource content."""
+    if str(uri) == "ui://widget/document-editor.html":
+        # Read the widget HTML (Same logic as list_resources, kept simple)
+        widget_path = Path("../frontend/dist/index.html")
+        if widget_path.exists():
+            return widget_path.read_text()
+        return """<!DOCTYPE html><html><body>Widget not built.</body></html>"""
+    
+    raise ValueError(f"Resource not found: {uri}")
+
 
 @app.list_tools()
 async def list_tools() -> list[Tool]:
@@ -265,7 +285,9 @@ async def list_tools() -> list[Tool]:
             _meta={
                 "openai/outputTemplate": "ui://widget/document-editor.html",
                 "openai/toolInvocation/invoking": "Uploading document...",
-                "openai/toolInvocation/invoked": "Document uploaded"
+                "openai/toolInvocation/invoked": "Document uploaded",
+                "openai/widget/csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+                "openai/widget/domain": "beata-discriminantal-sirena.ngrok-free.dev"
             }
         ),
         Tool(
@@ -288,7 +310,9 @@ async def list_tools() -> list[Tool]:
             _meta={
                 "openai/outputTemplate": "ui://widget/document-editor.html",
                 "openai/toolInvocation/invoking": "Analyzing document and generating suggestions...",
-                "openai/toolInvocation/invoked": "Analysis complete"
+                "openai/toolInvocation/invoked": "Analysis complete",
+                "openai/widget/csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+                "openai/widget/domain": "beata-discriminantal-sirena.ngrok-free.dev"
             }
         ),
         Tool(
@@ -312,10 +336,22 @@ async def list_tools() -> list[Tool]:
             _meta={
                 "openai/outputTemplate": "ui://widget/document-editor.html",
                 "openai/toolInvocation/invoking": "Applying changes to document...",
-                "openai/toolInvocation/invoked": "Changes applied successfully"
+                "openai/toolInvocation/invoked": "Changes applied successfully",
+                "openai/widget/csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';",
+                "openai/widget/domain": "beata-discriminantal-sirena.ngrok-free.dev"
             }
         ),
     ]
+
+@app.list_prompts()
+async def list_prompts() -> list[Prompt]:
+    """List available prompts."""
+    return []
+
+@app.list_resource_templates()
+async def list_resource_templates() -> list[ResourceTemplate]:
+    """List available resource templates."""
+    return []
 
 
 @app.call_tool()
@@ -325,8 +361,16 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     if name == "upload_document":
         # Decode and save document
         filename = arguments["filename"]
-        content = base64.b64decode(arguments["content"])
         
+        try:
+            content_str = arguments["content"]
+            # Fix padding if necessary
+            if len(content_str) % 4:
+                content_str += '=' * (4 - len(content_str) % 4)
+            content = base64.b64decode(content_str)
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error decoding file content: {str(e)}. Please ensure 'content' is valid Base64.")]
+
         doc_id = str(uuid.uuid4())
         doc_path = UPLOAD_DIR / f"{doc_id}.docx"
         
@@ -334,7 +378,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             f.write(content)
         
         # Extract metadata
-        metadata = extract_document_metadata(str(doc_path))
+        try:
+            metadata = extract_document_metadata(str(doc_path))
+        except Exception as e:
+            # If docx fails to open, it's likely not a valid docx file
+            if doc_path.exists():
+                doc_path.unlink()
+            return [TextContent(type="text", text=f"Error processing document: The uploaded file is not a valid Microsoft Word (.docx) document.\nDetails: {str(e)}")]
         
         # Store document info
         documents[doc_id] = {
@@ -347,6 +397,12 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             TextContent(
                 type="text",
                 text=f"Uploaded document: {filename}\nWord count: {metadata['word_count']}\nParagraphs: {metadata['paragraph_count']}",
+                annotations={
+                    "structuredContent": {
+                        "doc_id": doc_id,
+                        "filename": filename
+                    }
+                },
             )
         ]
     
@@ -403,14 +459,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         documents[doc_id]["modified_path"] = modified_path
         documents[doc_id]["download_filename"] = download_filename
         
+        # Use valid public URL for download
+        base_url = "https://beata-discriminantal-sirena.ngrok-free.dev"
+        
         return [
             TextContent(
                 type="text",
                 text=f"Applied {len(selected)} changes to document",
                 annotations={
                     "structuredContent": {
-                        # Use absolute URL for the widget
-                        "download_url": f"http://localhost:8787/api/download/{doc_id}",
+                        # Use public URL for the widget
+                        "download_url": f"{base_url}/api/download/{doc_id}",
                         "applied_count": len(selected),
                     }
                 },
@@ -458,28 +517,81 @@ async def handle_messages(request):
 from starlette.responses import Response, JSONResponse
 
 # SSE transport instance
-# The transport path should be relative to the mount point if the SDK handles it that way,
-# OR absolute. The double '/sse/sse' suggests current request path was prepended.
-# Let's try using an absolute path relative to root, but maybe the SDK logic adds it to current path.
-# If I change it to just "/messages", hopefully it becomes "/sse/messages".
-sse_transport = SseServerTransport("/messages")
+# SSE transport instance
+# We use the explicit path that matches our Mount structure to ensure the client
+# receives the correct URL for POST requests (e.g. https://domain.com/sse/messages)
+sse_transport = SseServerTransport("/sse/messages")
 
 async def handle_mcp_sse(scope, receive, send):
     """
     Combined ASGI handler for MCP SSE (Connection & Messages).
     Mounted at /sse.
     """
-    path = scope["path"]   # Relative to mount, e.g. "" or "/messages"
+import logging
+
+# Configure Logging to File
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename="server.log",
+    filemode="a",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    force=True
+)
+logger = logging.getLogger("server")
+
+# ... (rest of imports)
+
+async def log_receive_wrapper(receive):
+    """Wrapper to log incoming ASGI messages (request body)."""
+    message = await receive()
+    if message["type"] == "http.request":
+        body = message.get("body", b"")
+        if body:
+            logger.debug(f"📥 POST Body: {body.decode('utf-8', errors='replace')}")
+    return message
+
+async def handle_mcp_sse(scope, receive, send):
+    """
+    Combined ASGI handler for MCP SSE (Connection & Messages).
+    Mounted at /sse.
+    """
+    path = scope["path"]
     method = scope["method"]
     
-    # print(f"DEBUG: MCP Handler hit. Method: {method}, Path: {path}")
+    logger.debug(f"MCP Handler hit. Method: {method}, Path: {path}")
 
     if method == "POST":
          # Logic for message handling (POST /sse/messages)
          # We accept matching "/messages" or just loose matching if it's the only POST
-         await sse_transport.handle_post_message(scope, receive, send)
+         logger.debug("Handling POST message")
+         try:
+             # Wrap receive to capture body
+             async def wrapped_receive():
+                 message = await receive()
+                 if message["type"] == "http.request":
+                     body = message.get("body", b"")
+                     if body:
+                         logger.debug(f"📥 REQUEST BODY: {body.decode('utf-8', errors='replace')}")
+                 return message
+             
+             # Actually, simpler: just read body if I can put it back? No.
+             # Use the wrapper defined above? No, stateful closure needed for subsequent calls?
+             # Standard ASGI receive is one-time or stream.
+             # Let's simple-log inside a local wrapper.
+             async def logging_receive():
+                 msg = await receive()
+                 if msg['type'] == 'http.request':
+                     body = msg.get('body', b'')
+                     logger.debug(f"📥 RAW RECEIVED: {body.decode('utf-8', errors='replace')}")
+                 return msg
+
+             await sse_transport.handle_post_message(scope, logging_receive, send)
+         except Exception as e:
+            logger.error(f"ERROR in handle_post_message: {e}")
+            raise
     else:
          # Logic for connection (GET /sse)
+         logger.debug("Handling SSE connection")
          async with sse_transport.connect_sse(scope, receive, send) as streams:
              await app.run(streams[0], streams[1], app.create_initialization_options())
 
