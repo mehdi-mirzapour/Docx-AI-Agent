@@ -262,6 +262,11 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["filename", "content"],
             },
+            _meta={
+                "openai/outputTemplate": "ui://widget/document-editor.html",
+                "openai/toolInvocation/invoking": "Uploading document...",
+                "openai/toolInvocation/invoked": "Document uploaded"
+            }
         ),
         Tool(
             name="analyze_and_suggest",
@@ -280,6 +285,11 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["doc_id", "request"],
             },
+            _meta={
+                "openai/outputTemplate": "ui://widget/document-editor.html",
+                "openai/toolInvocation/invoking": "Analyzing document and generating suggestions...",
+                "openai/toolInvocation/invoked": "Analysis complete"
+            }
         ),
         Tool(
             name="apply_changes",
@@ -299,6 +309,11 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["doc_id", "suggestion_ids"],
             },
+            _meta={
+                "openai/outputTemplate": "ui://widget/document-editor.html",
+                "openai/toolInvocation/invoking": "Applying changes to document...",
+                "openai/toolInvocation/invoked": "Changes applied successfully"
+            }
         ),
     ]
 
