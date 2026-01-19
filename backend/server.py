@@ -430,39 +430,58 @@ import uvicorn
 # ... existing code ...
 
 async def handle_sse(request):
-    transport = SseServerTransport("/messages")
+    # Determine the absolute or relative path for the messages endpoint.
+    # Since we are mounting the messages handler at /sse/messages, we should tell the client to post there.
+    # SseServerTransport takes the endpoint URL that the client should POST to.
+    transport = SseServerTransport("/sse/messages")
     async with app.run(transport.read_stream, transport.write_stream, app.create_initialization_options()) as streams:
         await streams
     return await transport.handle_sse(request)
 
 async def handle_messages(request):
-    # This would need to be connected to the transport created in handle_sse
-    # However, the MCP SDK's SseServerTransport handles this internally if we structure it right
-    # For simplicity in this quickstart, we'll try to follow valid MCP SSE patterns
-    # But python SDK documentation for SSE is less common than Node.
+    # Since we are using Starlette, we need to bridge the request to the MCP transport.
+    # However, SseServerTransport.handle_post_message expects scope/receive/send (ASGI) or similar.
+    # The standard way with this SDK integration is tricky because `transport` is local to `handle_sse`.
+    # BUT, actually, for the standalone SseServerTransport, we should instantiate it once globally or per-session?
+    # No, MCP SDK design for Starlette/FastAPI usually implies we keep the transport alive.
+    # Let's fix this by using the ASGI app pattern if possible or a global transport map.
+    # FOR NOW: To keep it simple and working as per the previous working state (implied),
+    # we will rely on the fact that handle_sse creates a session.
+    # WAIT: Standard MCP python SDK usage for Starlette:
     
-    # Alternative: Use the high-level FastAPI/Starlette integration if available in SDK likely via mcp.server.fastapi?
-    # Let's check available moves. The simplest valid SSE implementation:
+    # We need a shared transport handling mechanism.
+    # Let's revert to a simpler "Global SSE" pattern for this demo to work reliably.
+    
     pass
 
 # Let's use the standard MCP SSE implementation pattern for Python
 from starlette.responses import Response, JSONResponse
-from mcp.server.sse import SseServerTransport
 
-sse = SseServerTransport("/messages")
+# SSE transport instance
+# The transport path should be relative to the mount point if the SDK handles it that way,
+# OR absolute. The double '/sse/sse' suggests current request path was prepended.
+# Let's try using an absolute path relative to root, but maybe the SDK logic adds it to current path.
+# If I change it to just "/messages", hopefully it becomes "/sse/messages".
+sse_transport = SseServerTransport("/messages")
 
-async def handle_sse(scope, receive, send):
+async def handle_mcp_sse(scope, receive, send):
     """
-    ASGI handler for SSE connections.
+    Combined ASGI handler for MCP SSE (Connection & Messages).
+    Mounted at /sse.
     """
-    async with sse.connect_sse(scope, receive, send) as streams:
-        await app.run(streams[0], streams[1], app.create_initialization_options())
+    path = scope["path"]   # Relative to mount, e.g. "" or "/messages"
+    method = scope["method"]
+    
+    # print(f"DEBUG: MCP Handler hit. Method: {method}, Path: {path}")
 
-async def handle_messages(scope, receive, send):
-    """
-    ASGI handler for message posting.
-    """
-    await sse.handle_post_message(scope, receive, send)
+    if method == "POST":
+         # Logic for message handling (POST /sse/messages)
+         # We accept matching "/messages" or just loose matching if it's the only POST
+         await sse_transport.handle_post_message(scope, receive, send)
+    else:
+         # Logic for connection (GET /sse)
+         async with sse_transport.connect_sse(scope, receive, send) as streams:
+             await app.run(streams[0], streams[1], app.create_initialization_options())
 
 async def handle_root(request):
     return JSONResponse({"status": "healthy", "message": "MCP Server is running"})
@@ -596,8 +615,7 @@ routes = [
     Route("/api/analyze", handle_analyze, methods=["POST"]),
     Route("/api/apply", handle_apply, methods=["POST"]),
     Route("/api/download/{doc_id}", handle_download, methods=["GET"]),
-    Mount("/sse/messages", app=handle_messages),
-    Mount("/sse", app=handle_sse),
+    Mount("/sse", app=handle_mcp_sse),
 ]
 
 # Configure CORS
