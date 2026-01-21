@@ -1,25 +1,26 @@
 #!/bin/bash
 echo "🚀 Starting DocxAI Fix & Deploy..."
 
-# 1. Stop existing containers
-echo "🛑 Stopping old containers..."
-docker rm -f docx-mcp 2>/dev/null || true
+# 1. Stop existing containers and clean images
+echo "🛑 Stopping old containers and removing images..."
+docker rm -f docx-mcp frontend mcp nginx 2>/dev/null || true
+docker rmi -f docx-mcp nginx 2>/dev/null || true
 pkill -f "python server.py" || true
 
-# 2. Build the Docker image (with frontend assets)
-echo "🔨 Building Docker image (this may take a minute)..."
-docker build -f Dockerfile.mcp -t docx-mcp .
+# 2. Start services using Docker Compose
+echo "🔨 Building and Starting containers..."
+if [ ! -f .env ]; then
+    echo "⚠️ .env file not found! Please ensure OPENAI_API_KEY is set."
+fi
 
-# 3. Run the new container
-echo "▶️ Starting container..."
-# Using the API key from your environment (Make sure OPENAI_API_KEY is set in your shell or .env)
-# export OPENAI_API_KEY="your-key-here"
+# Load env vars from .env for the script execution context
+export $(grep -v '^#' .env | xargs)
 
-docker run -d \
-  -p 8787:8787 \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  --name docx-mcp \
-  docx-mcp
+docker-compose down --rmi all --remove-orphans 2>/dev/null || true
+docker-compose up --build -d
+
+echo "📊 Checking running containers..."
+docker-compose ps
 
 # 4. Restart ngrok
 echo "🌐 Restarting ngrok..."
