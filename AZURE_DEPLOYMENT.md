@@ -42,27 +42,23 @@ az acr login --name docxaicr
 
 ---
 
-## 3. Build & Push Images
+### 🔹 ACR Build & Push (Recommended)
 You must build and push all 3 images (including Nginx).
 
 ```bash
 export ACR_NAME=docxaicr
 
-# 1. Nginx (Your Gateway)
-docker build -f Dockerfile.nginx -t $ACR_NAME.azurecr.io/docxai-nginx:latest .
-docker push $ACR_NAME.azurecr.io/docxai-nginx:latest
+# 1. MCP (API Backend)
+docker build -f Dockerfile.mcp -t $ACR_NAME.azurecr.io/docxai-mcp:latest .
+docker push $ACR_NAME.azurecr.io/docxai-mcp:latest
 
 # 2. Frontend
 docker build -f Dockerfile.frontend -t $ACR_NAME.azurecr.io/docxai-frontend:latest .
 docker push $ACR_NAME.azurecr.io/docxai-frontend:latest
 
-# 3. Backend
-docker build -f Dockerfile.backend -t $ACR_NAME.azurecr.io/docxai-backend:latest .
-docker push $ACR_NAME.azurecr.io/docxai-backend:latest
-
-# 4. MCP
-docker build -f Dockerfile.mcp -t $ACR_NAME.azurecr.io/docxai-mcp:latest .
-docker push $ACR_NAME.azurecr.io/docxai-mcp:latest
+# 3. Nginx (Gateway)
+docker build -f Dockerfile.nginx -t $ACR_NAME.azurecr.io/docxai-nginx:latest .
+docker push $ACR_NAME.azurecr.io/docxai-nginx:latest
 ```
 
 ---
@@ -103,7 +99,7 @@ az webapp config appsettings set \
   DOCKER_REGISTRY_SERVER_USERNAME="docxaicr" \
   DOCKER_REGISTRY_SERVER_PASSWORD=$ACR_PASS \
   DOCKER_REGISTRY="docxaicr.azurecr.io" \
-  OPENAI_API_KEY="paste-your-key-here" \
+  OPENAI_API_KEY="your-openai-key-here" \
   WEBSITES_PORT=80
 ```
 *Note: `WEBSITES_PORT=80` tells Azure to expose the Nginx container.*
@@ -127,9 +123,13 @@ az webapp config appsettings set \
 
 ---
 
-## 5. Verification
-Go to `https://docxai-app.azurewebsites.net`.
-- Nginx will receive the request.
-- It will route `/` to your Frontend.
-- It will route `/api/` to your Backend.
-- Front Door is **NOT** needed.
+---
+
+## 6. Cleanup
+**Goal:** Delete all resources to avoid ongoing costs.
+
+```bash
+# Delete the entire resource group and all resources inside it
+az group delete --name docxai-rg --yes --no-wait
+```
+*Note: `--no-wait` allows the command to return immediately while the deletion continues in the background.*
