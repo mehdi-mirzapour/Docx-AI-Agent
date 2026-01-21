@@ -37,17 +37,17 @@ az account set --subscription "<your-subscription-id>"
 az group create --name docxai-rg --location westeurope
 
 # 2. Container Registry (ACR)
-az acr create --resource-group docxai-rg --name docxaiunique123 --sku Basic --admin-enabled true
+az acr create --resource-group docxai-rg --name docxaiacr --sku Basic --admin-enabled true
 
 # Login to ACR locally
-az acr login --name docxaiunique123
+az acr login --name docxaiacr
 ```
 
 ### B. Build & Push Images
 You must build and push all 3 images separately.
 
 ```bash
-export ACR_NAME=docxaiunique123
+export ACR_NAME=docxaiacr
 
 # 1. Frontend Image
 docker build -f Dockerfile.frontend -t $ACR_NAME.azurecr.io/docxai-frontend:latest .
