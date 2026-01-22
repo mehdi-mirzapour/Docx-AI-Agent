@@ -4,6 +4,22 @@ This guide describes how to deploy the DocxAI solution (MCP, Frontend, and Nginx
 
 ## Architecture
 
+```mermaid
+graph TD
+    User((User)) -->|Public IP / 443| Nginx[nginx-gateway]
+    
+    subgraph "ACA Environment (Virtual Network)"
+        Nginx -->|Proxy /api| MCP[mcp-app]
+        Nginx -->|Proxy /| FE[frontend-app]
+        
+        MCP -.->|OpenAI SDK| GPT4[ChatGPT / GPT-4o]
+    end
+    
+    ACR[Azure Container Registry] -->|Pull Images| Nginx
+    ACR -->|Pull Images| MCP
+    ACR -->|Pull Images| FE
+```
+
 The deployment consists of three container apps running in a single **Container Apps Environment**:
 
 1.  **mcp-app**: The Python/FastAPI backend and MCP server.

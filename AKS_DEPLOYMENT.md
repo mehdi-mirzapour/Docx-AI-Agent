@@ -4,6 +4,26 @@ This guide describes how to deploy the DocxAI solution (MCP, Frontend, and Nginx
 
 ## Architecture
 
+```mermaid
+graph TD
+    User((User)) -->|Load Balancer Public IP| Svc[nginx-service]
+    
+    subgraph "AKS Cluster (Namespace: default)"
+        Svc -->|Route| NginxPod[Nginx Pods]
+        NginxPod -->|Proxy /api| MCP[MCP Pods]
+        NginxPod -->|Proxy /| FE[Frontend Pods]
+        
+        MCP -.->|OpenAI SDK| GPT4[ChatGPT / GPT-4o]
+        
+        K8sSecret[K8s Secret: docxai-secrets] -->|Inject API Key| MCP
+    end
+    
+    ACR[Azure Container Registry] -->|Attached| AKS[AKS Nodes]
+    AKS -->|docker pull| NginxPod
+    AKS -->|docker pull| MCP
+    AKS -->|docker pull| FE
+```
+
 The deployment is managed by Kubernetes and consists of:
 
 -   **MCP Deployment:** Python/FastAPI backend.
