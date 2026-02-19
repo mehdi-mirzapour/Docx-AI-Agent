@@ -1,325 +1,203 @@
-import React, { useState, useEffect } from 'react'
+
+import { useState } from 'react'
+import axios from 'axios'
+import { Upload, Check, X, FileText, Loader2, RefreshCw } from 'lucide-react'
 import './App.css'
 
-const API_BASE = window.DOCX_API_URL || 'http://localhost:8787/api'
+const API_BASE = "http://127.0.0.1:8000";
 
 function App() {
-    const [suggestions, setSuggestions] = useState([])
-    const [docId, setDocId] = useState(null)
-    const [selectedSuggestions, setSelectedSuggestions] = useState(new Set())
-    const [downloadUrl, setDownloadUrl] = useState(null)
-    const [status, setStatus] = useState('idle')
+  const [file, setFile] = useState(null)
+  const [processedFile, setProcessedFile] = useState(null)
+  const [changes, setChanges] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [processing, setProcessing] = useState(false)
 
-    // Standalone mode state
-    const [isStandalone, setIsStandalone] = useState(false)
-    const [file, setFile] = useState(null)
-    const [editRequest, setEditRequest] = useState('')
-    const [uploading, setUploading] = useState(false)
-    const [analyzing, setAnalyzing] = useState(false)
-    const [progress, setProgress] = useState('')
-
-    // Detect if running in standalone mode (no ChatGPT)
-    useEffect(() => {
-        setIsStandalone(!window.openai)
-    }, [])
-
-    // Initialize from ChatGPT's toolOutput
-    useEffect(() => {
-        const initialData = window.openai?.toolOutput
-        if (initialData?.doc_id) {
-            setDocId(initialData.doc_id)
-        }
-        if (initialData?.suggestions) {
-            setSuggestions(initialData.suggestions)
-        }
-    }, [])
-
-    // Listen for updates from ChatGPT
-    useEffect(() => {
-        const handleSetGlobals = (event) => {
-            const globals = event.detail?.globals
-            if (!globals?.toolOutput) return
-
-            if (globals.toolOutput.doc_id) {
-                setDocId(globals.toolOutput.doc_id)
-            }
-
-            if (globals.toolOutput.suggestions) {
-                setSuggestions(globals.toolOutput.suggestions)
-            }
-
-            if (globals.toolOutput.download_url) {
-                setDownloadUrl(globals.toolOutput.download_url)
-                setStatus('completed')
-            }
-        }
-
-        window.addEventListener('openai:set_globals', handleSetGlobals, {
-            passive: true,
-        })
-
-        return () => {
-            window.removeEventListener('openai:set_globals', handleSetGlobals)
-        }
-    }, [])
-
-    // ... (handleFileUpload code omitted for brevity, keeping existing) ...
-
-    // ... (handleApplyChanges code omitted for brevity) ...
-
-
-
-    // Standalone mode: Upload file
-    const handleFileUpload = async () => {
-        if (!file || !editRequest) {
-            alert('Please select a file and enter an edit request')
-            return
-        }
-
-        setUploading(true)
-        setStatus('idle')
-        const formData = new FormData()
-        formData.append('file', file)
-
-        try {
-            // Upload document
-            const uploadRes = await fetch(`${API_BASE}/upload`, {
-                method: 'POST',
-                body: formData,
-            }).catch(err => {
-                throw new Error(`Network error: Unable to connect to server. Please ensure the backend is running on port 8787. Details: ${err.message}`)
-            })
-
-            const uploadData = await uploadRes.json().catch(() => {
-                throw new Error('Invalid response from server during upload')
-            })
-
-            if (!uploadRes.ok) {
-                throw new Error(uploadData.error || `Upload failed with status ${uploadRes.status}`)
-            }
-
-            setDocId(uploadData.doc_id)
-            setUploading(false)
-            setAnalyzing(true)
-            setProgress('Analyzing document with AI... This may take 20-30 seconds for large documents.')
-
-            // Analyze document
-            const analyzeRes = await fetch(`${API_BASE}/analyze`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    doc_id: uploadData.doc_id,
-                    request: editRequest,
-                }),
-            }).catch(err => {
-                throw new Error(`Network error during analysis: ${err.message}`)
-            })
-
-            const analyzeData = await analyzeRes.json().catch(() => {
-                throw new Error('Invalid response from server during analysis')
-            })
-
-            if (!analyzeRes.ok) {
-                throw new Error(analyzeData.error || `Analysis failed with status ${analyzeRes.status}`)
-            }
-
-            setSuggestions(analyzeData.suggestions)
-            setAnalyzing(false)
-            setStatus('completed')
-            setProgress('')
-        } catch (error) {
-            console.error('Error:', error)
-            // Display user-friendly error message
-            const errorMessage = error.message.includes('CORS')
-                ? 'Connection blocked by browser security. Please ensure the backend server is running and CORS is configured correctly.'
-                : error.message
-            alert(`❌ ${errorMessage}`)
-            // Reset all loading states
-            setUploading(false)
-            setAnalyzing(false)
-            setStatus('error')
-            setProgress('')
-        }
+  const handleFileChange = (e) => {
+    if (e.target.files) {
+      setFile(e.target.files[0])
     }
+  }
 
-    const toggleSuggestion = (suggestionId) => {
-        setSelectedSuggestions((prev) => {
-            const newSet = new Set(prev)
-            if (newSet.has(suggestionId)) {
-                newSet.delete(suggestionId)
-            } else {
-                newSet.add(suggestionId)
-            }
-            return newSet
-        })
+  const handleUpload = async () => {
+    if (!file) return;
+    setLoading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      // 1. Upload and get processed file
+      const res = await axios.post(`${API_BASE}/suggest-changes/`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        responseType: 'blob'
+      });
+
+      // The backend returns the file blob, but we know the name is likely "suggested_" + original
+      // Wait, my backend logic returns FileResponse. 
+      // I need to know the *filename* to query changes.
+      // The backend saves it as `suggested_{file.filename}`.
+
+      const suggestedName = `suggested_${file.name}`; // Simplified assumption
+      setProcessedFile(suggestedName);
+
+      // 2. Fetch changes
+      await fetchChanges(suggestedName);
+
+    } catch (err) {
+      console.error(err);
+      alert("Error processing file");
+    } finally {
+      setLoading(false);
     }
+  };
 
-    const handleApplyChanges = async () => {
-        if (!docId || selectedSuggestions.size === 0) return
+  const fetchChanges = async (filename) => {
+    try {
+      const res = await axios.get(`${API_BASE}/changes/${filename}`);
+      setChanges(res.data.changes || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
-        setStatus('applying')
 
-        try {
-            const response = await fetch(`${API_BASE}/apply`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    doc_id: docId,
-                    suggestion_ids: Array.from(selectedSuggestions),
-                }),
-            })
-            const data = await response.json()
+  const handleAction = async (change, action) => {
+    setProcessing(true);
+    try {
+      if (change.type === 'update') {
+        // Handle update: Apply action to BOTH IDs
+        // Accept Update = Accept Deletion (remove old) + Accept Insertion (keep new)
+        // Reject Update = Reject Deletion (keep old) + Reject Insertion (remove new)
 
-            if (!response.ok) {
-                throw new Error(data.error || 'Apply failed')
-            }
-
-            // Construct download URL using the current origin (API_BASE minus /api)
-            // API_BASE is e.g. "https://ngrok-url/api"
-            const baseUrl = API_BASE.replace(/\/api$/, '')
-            setDownloadUrl(`${baseUrl}${data.download_url}`)
-            setStatus('completed')
-        } catch (error) {
-            console.error('Error applying changes:', error)
-            setStatus('error')
-            alert(`Failed to apply changes: ${error.message}`)
+        for (const id of change.ids) {
+          await axios.post(`${API_BASE}/changes/${processedFile}/${id}/${action}`);
         }
+
+      } else {
+        // Single action
+        await axios.post(`${API_BASE}/changes/${processedFile}/${change.id}/${action}`);
+      }
+
+      // Remove from local state
+      setChanges(prev => prev.filter(c =>
+        change.type === 'update' ? c !== change : c.id !== change.id
+      ));
+
+    } catch (err) {
+      console.error(err);
+      alert("Failed to apply action");
+    } finally {
+      setProcessing(false);
     }
+  }
 
-    if (suggestions.length === 0) {
-        return (
-            <div className="container">
-                <div className="empty-state">
-                    <h2>📄 Document Editor</h2>
 
-                    <p>Upload a Word document and request edits</p>
-                    <div className="upload-form">
-                        <input
-                            type="file"
-                            accept=".docx"
-                            onChange={(e) => setFile(e.target.files[0])}
-                            className="file-input"
-                        />
-                        <input
-                            type="text"
-                            placeholder="Enter edit request (e.g., 'make it more formal')"
-                            value={editRequest}
-                            onChange={(e) => setEditRequest(e.target.value)}
-                            className="text-input"
-                        />
-                        <button
-                            onClick={handleFileUpload}
-                            disabled={!file || !editRequest || uploading || analyzing}
-                            className="btn-primary"
-                        >
-                            {uploading ? 'Uploading...' : analyzing ? 'Analyzing... (20-30s)' : 'Upload & Analyze'}
-                        </button>
-                        {progress && (
-                            <p style={{
-                                marginTop: '12px',
-                                fontSize: '0.9rem',
-                                color: '#6366f1',
-                                textAlign: 'center',
-                                fontWeight: '500'
-                            }}>
-                                ⏳ {progress}
-                            </p>
-                        )}
-                        {(!file || !editRequest) && (
-                            <p style={{
-                                marginTop: '12px',
-                                fontSize: '0.85rem',
-                                color: '#ef4444',
-                                textAlign: 'center'
-                            }}>
-                                {!file && !editRequest && '⚠️ Please select a document and enter a request'}
-                                {!file && editRequest && '⚠️ Please select a document'}
-                                {file && !editRequest && '⚠️ Please enter an edit request'}
-                            </p>
-                        )}
-                    </div>
-                </div>
-            </div>
-        )
-    }
+  const handleDownload = (e) => {
+    e.preventDefault();
+    if (!processedFile) return;
 
-    return (
-        <div className="container">
-            <header className="header">
-                <h2>📝 Suggested Edits</h2>
-                <p className="subtitle">
-                    {suggestions.length} suggestion{suggestions.length !== 1 ? 's' : ''} found
-                </p>
-            </header>
+    // Direct download via backend URL. 
+    // The backend sets 'Content-Disposition: attachment; filename="..."'
+    // This allows the browser to handle the filename correctly even across origins.
+    window.location.href = `${API_BASE}/download/${processedFile}`;
+  };
 
-            <div className="suggestions-list">
-                {suggestions.map((suggestion) => (
-                    <div
-                        key={suggestion.id}
-                        className={`suggestion-card ${selectedSuggestions.has(suggestion.id) ? 'selected' : ''
-                            }`}
-                    >
-                        <label className="suggestion-label">
-                            <input
-                                type="checkbox"
-                                checked={selectedSuggestions.has(suggestion.id)}
-                                onChange={() => toggleSuggestion(suggestion.id)}
-                            />
-                            <div className="suggestion-content">
-                                <div className="text-comparison">
-                                    <div className="text-block original">
-                                        <span className="label">Original:</span>
-                                        <p>{suggestion.original}</p>
-                                    </div>
-                                    <div className="arrow">→</div>
-                                    <div className="text-block suggested">
-                                        <span className="label">Suggested:</span>
-                                        <p>{suggestion.suggested}</p>
-                                    </div>
-                                </div>
-                                <div className="reason">
-                                    <span className="reason-icon">💡</span>
-                                    {suggestion.reason}
-                                </div>
-                            </div>
-                        </label>
-                    </div>
-                ))}
-            </div>
+  return (
+    <div className="container">
+      <header className="hero">
+        <h1>Docx AI Agent</h1>
+        <p>Upload your document and let AI suggest improvements.</p>
+      </header>
 
-            <div className="action-bar">
-                <button
-                    className="btn-primary"
-                    onClick={handleApplyChanges}
-                    disabled={selectedSuggestions.size === 0 || status === 'applying'}
-                >
-                    {status === 'applying'
-                        ? 'Applying Changes...'
-                        : `Apply ${selectedSuggestions.size} Selected Change${selectedSuggestions.size !== 1 ? 's' : ''
-                        }`}
-                </button>
-
-                {downloadUrl && (
-                    <a href={downloadUrl} download className="btn-download">
-                        ⬇️ Download Modified Document
-                    </a>
-                )}
-            </div>
-
-            {status === 'completed' && (
-                <div className="success-message">
-                    ✅ Changes applied successfully! Download your document above.
-                </div>
-            )}
-
-            {status === 'error' && (
-                <div className="error-message">
-                    ❌ Error applying changes. Please try again.
-                </div>
-            )}
+      <div className="upload-section">
+        <div className="file-input-wrapper">
+          <input type="file" id="file" onChange={handleFileChange} accept=".docx" />
+          <label htmlFor="file" className="file-label">
+            <Upload size={20} />
+            {file ? file.name : "Choose a .docx file"}
+          </label>
         </div>
-    )
+
+        <button
+          className="process-btn"
+          onClick={handleUpload}
+          disabled={!file || loading}
+        >
+          {loading ? <Loader2 className="spin" /> : "Process & Analyze"}
+        </button>
+      </div>
+
+      {processedFile && (
+        <div className="workspace">
+          <div className="changes-panel">
+
+            <div className="panel-header">
+              <h2>Detected Suggestions ({changes.length})</h2>
+              <div className="panel-actions">
+                <button className="icon-btn" onClick={() => fetchChanges(processedFile)} title="Refresh">
+                  <RefreshCw size={16} />
+                </button>
+                <a
+                  href="#"
+                  onClick={handleDownload}
+                  className="download-btn"
+                >
+                  <FileText size={16} /> Download
+                </a>
+              </div>
+            </div>
+
+            <div className="changes-list">
+              {changes.length === 0 ? (
+                <div className="empty-state">No pending changes found.</div>
+              ) : (
+                changes.map((change, idx) => (
+                  <div key={idx} className={`change-card ${change.type}`}>
+                    <div className="change-meta">
+                      <span className="change-type">{change.type}</span>
+                      <span className="change-author">{change.author}</span>
+                    </div>
+
+                    <div className="change-content">
+                      {change.type === 'update' ? (
+                        <div className="update-diff">
+                          <span className="diff-old">{change.original}</span>
+                          <span className="diff-arrow">→</span>
+                          <span className="diff-new">{change.new}</span>
+                        </div>
+                      ) : (
+                        `"${change.text}"`
+                      )}
+                    </div>
+
+                    <div className="change-context">
+                      Context: {change.context}
+                    </div>
+                    <div className="change-actions">
+                      <button
+                        className="action-btn accept"
+                        onClick={() => handleAction(change, 'accept')}
+                        disabled={processing}
+                      >
+                        <Check size={16} /> Accept
+                      </button>
+                      <button
+                        className="action-btn reject"
+                        onClick={() => handleAction(change, 'reject')}
+                        disabled={processing}
+                      >
+                        <X size={16} /> Reject
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default App
-
