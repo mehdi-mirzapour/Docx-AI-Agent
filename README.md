@@ -1,158 +1,122 @@
-# 📝 Docs Suggester AI (DocxAI)
+# 🤖 Docx AI Agent - Suggestion Engine
 
-> **Now with Native ChatGPT Panel Support! 🚀**
+This project is an AI-powered assistant for improving Microsoft Word (`.docx`) documents. It scans your files, identifies areas for improvement (such as rephrasing, punctuation, and formatting), and inserts changes directly as **native Tracked Changes**.
 
-AI-powered document review agent for consulting deliverables. Works seamlessly inside **ChatGPT** via a custom interactive panel, or as a standalone REST API.
+This allows you to download the modified document and accept or reject suggestions using Microsoft Word's standard review tools, or interactively via our web interface.
 
-![Demo UI](demo_ui.png)
+## 🌟 Key Features
 
----
+- **Automated Document Review**: The AI analyzes your text for clarity, tone, and correctness.
+- **Native Tracked Changes**: Suggestions are inserted as specific `w:ins` (insertion) and `w:del` (deletion) XML tags, ensuring full compatibility with Word's "Track Changes" feature.
+- **Interactive Web UI**: Review suggestions side-by-side, with "Accept" and "Reject" actions that modify the underlying document in real-time.
+- **Downloadable Results**: Get your polished file with all unreviewed suggestions still tracked for offline review.
 
-## ✨ Features
+## 🔄 Application Flow
 
-- **🎨 Interactive Widget**: Upload and edit documents directly inside ChatGPT (no external file hosts needed).
-- **🧠 GPT-4o Integration**: Uses the latest AI models for high-quality consulting feedback.
-- **🔒 Secure Connectivity**: Dynamically injects secure Ngrok tunnels for safe API communication.
-- **⚡️ Smart Editing**: 
-  - Detects tone issues (e.g., "don't" → "do not")
-  - Flag long, complex paragraphs
-  - Rewrite text for clarity and impact
-- **⬇️ Direct Download**: Get your modified `.docx` file instantly from the panel.
+```mermaid
+sequenceDiagram
+    participant User
+    participant Frontend as Frontend (React)
+    participant Backend as Backend (FastAPI)
+    participant FS as File System
 
----
+    User->>Frontend: Upload .docx
+    Frontend->>Backend: POST /suggest-changes/
+    Backend->>FS: Save Upload
+    Backend->>Backend: Parse & Inject XML (w:ins/w:del)
+    Backend->>FS: Save "suggested_filename.docx"
+    Backend-->>Frontend: Return File Blob
 
-## 🚀 Quick Start
+    Frontend->>Backend: GET /changes/{filename}
+    Backend->>FS: Read Processed File
+    Backend->>Backend: Extract Change IDs & Text
+    Backend-->>Frontend: Return JSON List of Changes
+
+    loop User Review
+        User->>Frontend: Accept/Reject Change
+        Frontend->>Backend: POST /changes/{filename}/{id}/{action}
+        Backend->>FS: Load File
+        Backend->>Backend: Javascript-like DOM manipulation on XML
+        Backend->>FS: Save Updates
+        Backend-->>Frontend: Success
+    end
+
+    User->>Frontend: Download Final Doc
+    Frontend->>Backend: GET /download/{filename}
+    Backend-->>User: File Download
+```
+
+## 🛠️ Tech Stack
+
+### Backend (`/backend`)
+- **Framework**: [FastAPI](https://fastapi.tiangolo.com/) - High-performance Python API.
+- **Document Processing**: `python-docx` with custom XML manipulation for revision tracking.
+- **Dependency Management**: `uv` (or pip).
+
+### Frontend (`/frontend`)
+- **Framework**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/).
+- **Styling**: CSS Modules/Standard CSS.
+- **Icons**: [Lucide React](https://lucide.dev/).
+- **HTTP Client**: Axios.
+
+## 🚀 Getting Started
 
 ### Prerequisites
 - Python 3.10+
-- Node.js & npm
-- `uv` (recommended) or `pip`
+- Node.js & npm/pnpm
 
-### 1. Installation
+### 1. Backend Setup
+Navigate to the `backend` directory and install dependencies:
 
-**Backend setup:**
 ```bash
 cd backend
-uv pip install -r requirements.txt
+# Using uv (recommended)
+uv pi install -r requirements.txt # or just sync if using uv.lock
+# Or using pip
+pip install -r requirements.txt
 ```
 
-**Frontend setup:**
+Start the API server:
+
+```bash
+uvicorn main:app --reload
+# Server running at http://localhost:8000
+```
+
+### 2. Frontend Setup
+Navigate to the `frontend` directory:
+
 ```bash
 cd frontend
-npm install
-npm run build
+npm install # or pnpm install
 ```
 
-**Widget Compilation:**
-This connects the frontend to the backend logic.
+Start the development server:
+
 ```bash
-# From project root
-python3 inline_assets.py
+npm run dev
+# App running at http://localhost:5173
 ```
 
-### 2. Running the Server
+## 📖 Usage Guide
 
-You need two things running: the **backend server** and **ngrok** tunnel.
-
-**Start the Backend:**
-```bash
-cd backend
-python server.py
-# Runs on http://localhost:8787
-```
-
-**Start Ngrok:**
-```bash
-ngrok http 8787
-```
-*Note the HTTPS URL provided by ngrok (e.g., `https://xxxx.ngrok-free.app`).*
-
----
-
-## 🤖 Usage: ChatGPT Integration
-
-This is the primary way to use the agent.
-
-1.  **Configure ChatGPT**:
-    -   Go to **GPT Builder** (`@Docs Suggester AI`).
-    -   Add Action -> Import from URL: `https://your-ngrok-url.ngrok-free.app/sse`
-    
-2.  **Start Editing**:
-    -   Just type: **"Open DocxAI Panel"**
-    -   The interactive widget will appear above the chat.
-    
-3.  **Workflow**:
-    -   **Upload**: Click the file input in the panel.
-    -   **Analyze**: Type "Make this more professional" and click **Upload & Analyze**.
-    -   **Review**: Select the suggestions you like.
-    -   **Apply**: Click **Apply Changes**.
-    -   **Download**: Click the download button to get your new file.
-
----
-
-## 🛠️ Architecture: The "Proper" Solution
-
-We implemented a robust **Dynamic Host Injection** architecture to solve the "localhost in cloud" problem.
-
-
-
-1.  **Self-Contained Frontend**: The React widget is built into a single `index.html` file using `inline_assets.py`.
-2.  **Runtime Injection**: When you request the panel, the backend updates the widget code on-the-fly with the current secure Ngrok URL.
-3.  **Direct Communication**: The widget talks directly to your backend, bypassing ChatGPT's restrictive file handling limits.
-
----
-
-## ☁️ Deployment: Azure Multi-Container Strategy
-
-For production-grade environments, the project supports a **Multi-Container Azure App Service** deployment. This methodology ensures scalability and a unified entry point.
-
-### Deployment Methodology:
-1.  **Containerization**: Three distinct services are orchestrated:
-    -   **MCP Backend**: FastAPI server handling logic and MCP protocol.
-    -   **React Frontend**: Static assets served via a dedicated web server.
-    -   **Nginx Gateway**: A unified reverse-proxy that routes traffic to the correct internal containers and manages SSE (Server-Sent Events) headers.
-2.  **Architecture**: Deployment is performed via Azure Container Registry (ACR) and managed through Docker Compose configurations on Azure App Service.
-3.  **Cross-Platform Builds**: Images are built using `linux/amd64` to ensure compatibility with Azure infrastructure.
-4.  **Security**: Environment variables (like `OPENAI_API_KEY`) and registry credentials are managed securely through Azure's Application Settings.
-
----
-
-## 🔌 API Reference & Documentation
-
-The backend is built with **FastAPI**, providing automatic, interactive documentation.
-
-### Interactive Swagger UI
-When running the application (locally or on Azure), you can access the interactive Swagger documentation at:
--   **Endpoint**: `/api/docs`
--   **Features**: Test endpoints, view request/response schemas, and explore the API structure.
-
-### Standard REST Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/upload` | Upload `.docx` file |
-| `POST` | `/api/analyze` | Get AI suggestions |
-| `POST` | `/api/apply` | Apply selected edits |
-| `GET` | `/api/download/{id}` | Download result |
-
----
+1.  Open the web application (`http://localhost:5173`).
+2.  Click **Upload** to select your `.docx` file.
+3.  Wait for the AI to process the document.
+4.  Review the suggestions in the right-hand panel:
+    -   **Accept**: Permanently applies the change.
+    -   **Reject**: Discards the suggestion and restores original text.
+5.  Click **Download** to save the updated file.
 
 ## 📂 Project Structure
 
 ```
-.
-├── backend/
-│   ├── server.py           # FastAPI MCP Server + Injection Logic
-│   └── requirements.txt    # Python dependencies
-├── frontend/
-│   ├── src/App.jsx         # React Widget Logic
-│   └── dist/index.html     # Compiled Widget
-├── inline_assets.py        # Build script for widget
-├── deploy-azure.sh         # Automated Azure deployment script
-├── docker-compose-azure.yml # Azure orchestration config
-└── nginx.conf              # Gateway proxy configuration
+Docx-AI-Agent/
+├── backend/            # Python API
+│   ├── main.py         # App entry point & logic
+│   └── uploads/        # Temporary storage
+├── frontend/           # React App
+│   ├── src/            # Components & Logic
+│   └── public/         # Static assets
+└── .agent/             # Agent configuration & Skills
 ```
-
-## License
-
-MIT
