@@ -3,97 +3,36 @@ name: python_docx_manipulation
 description: Guide to analyzing and manipulating .docx files using python-docx and XML parsing, including safe ID generation.
 ---
 
-# Manipulating .docx Files with Python
+# Python-docx Manipulation Tips
 
-This skill documents how to analyze `.docx` content (OpenXML), specifically focusing on reading text, identifying structure, and safely manipulating tracked changes (revisions).
+This skill covers the core logic of reading and modifying Word documents for AI-powered suggestions.
 
-## 1. Understanding the .docx Structure
-
-A `.docx` file is a ZIP archive containing XML files. The most critical one for analysis is `word/document.xml`.
-
-### Key XML Elements
-*   **`<w:p>`**: Paragraph (block of text).
-*   **`<w:r>`**: Run (inline text with formatting).
-*   **`<w:t>`**: Text content.
-*   **`<w:pPr>`**: Paragraph Properties (style, alignment).
-*   **`<w:pStyle w:val="Heading1"/>`**: Defines the style of the paragraph (e.g., Header).
-*   **`<w:ins>`**: Inserted text (Track Changes).
-*   **`<w:del>`**: Deleted text (Track Changes).
-
-## 2. Analyzing Content with python-docx
-
-When using `python-docx`, you interact with `Document` objects, but often need to drop down to the underlying XML (`lxml`) for advanced features like Track Changes.
-
-### Reading Paragraphs and Styles
-```python
-from docx import Document
-
-doc = Document('file.docx')
-for p in doc.paragraphs:
-    # Access style name
-    if p.style.name.startswith('Heading'):
-        print(f"Header: {p.text}")
-    
-    # Access underlying XML element
-    xml_element = p._p
-```
-
-### Detecting Tracked Changes
-To find suggestions (insertions/deletions), iterate through the XML children of a paragraph:
+## 1. Reading Text Efficiently
+Always skip empty paragraphs and handle word counting at the paragraph level for better batching.
 
 ```python
-from docx.oxml.ns import qn
-
-def get_changes(doc):
-    changes = []
-    for p in doc.paragraphs:
-        # Iterate over all children (runs, ins, del)
-        for child in p._p.iterchildren():
-            if child.tag.endswith('ins'):
-                # Insertion
-                text = "".join([t.text for t in child.iter() if t.tag.endswith('t')])
-                changes.append({"type": "insertion", "text": text, "id": child.get(qn('w:id'))})
-            
-            elif child.tag.endswith('del'):
-                # Deletion
-                text = "".join([t.text for t in child.iter() if t.tag.endswith('delText')])
-                changes.append({"type": "deletion", "text": text, "id": child.get(qn('w:id'))})
-    return changes
+paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+word_count = sum(len(p.split()) for p in paragraphs)
 ```
 
-## 3. Generating Unique IDs for Revisions
+## 2. Batching for AI Analysis
+Don't send the whole document at once. Batch paragraphs (e.g., 5-10 at a time) to GPT-4o to stay within context limits and get higher quality, specific JSON suggestions.
 
-When creating new `w:ins` or `w:del` elements, you MUST provide a unique `w:id`.
-*   **Requirement**: A signed 32-bit integer.
-*   **Risk**: `random.randint` can collide.
-*   **Solution**: Use a masked UUID.
+## 3. Applying Changes Safely
+**Crucial Pattern:** When applying multiple text replacements, always sort your suggestion list by `paragraph_index` in **reverse order**.
+- **Why?** Replacing text can change the length or contents of the `paragraphs` collection. Processing from bottom to top ensures your indices remain valid.
 
-### Safe ID Generation Code
 ```python
-import uuid
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-import time
-
-def create_tracked_insertion(text, author="AI_Reviewer"):
-    date = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        
-    run = OxmlElement('w:ins')
-    
-    # GENERATE UNIQUE ID
-    # Use UUID masked to a positive 30-bit integer to ensure uniqueness and XML compliance
-    unique_id = str(uuid.uuid4().int & (1<<30)-1)
-    
-    run.set(qn('w:id'), unique_id)
-    run.set(qn('w:author'), author)
-    run.set(qn('w:date'), date)
-    
-    r = OxmlElement('w:r')
-    t = OxmlElement('w:t')
-    t.text = text
-    r.append(t)
-    run.append(r)
-    return run
+sorted_suggestions = sorted(selected_suggestions, key=lambda x: x["paragraph_index"], reverse=True)
+for sug in sorted_suggestions:
+    doc.paragraphs[sug["paragraph_index"]].text = sug["suggested"]
 ```
 
-This method ensures that every tracked change has a statistically unique ID, preventing corruption or merging of changes by Word.
+## 4. Simulating Track Changes
+`python-docx` does not support the native "Track Changes" feature easily.
+- **Alternative:** Use font colors or background highlights to indicate suggested vs. original text if the user wants to see the diff in the Word file.
+- **Implementation:** `paragraph.runs[0].font.color.rgb = RGBColor(0x00, 0x00, 0xFF)`
+
+## 5. Metadata and Cleanup
+- Always verify if a file is a valid zip/docx before processing (`zipfile.is_zipfile`).
+- Implement an automated cleanup for the `uploads/` folder to prevent disk exhaustion.

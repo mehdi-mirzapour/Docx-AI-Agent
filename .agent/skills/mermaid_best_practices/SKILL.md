@@ -5,61 +5,27 @@ description: Guidelines for creating stable, error-free Mermaid diagrams by avoi
 
 # Mermaid Diagram Best Practices
 
-This skill outlines guidelines for generating robust and error-free Mermaid diagrams, specifically addressing common issues like emoji usage and complex characters.
+This project uses Mermaid diagrams for architecture documentation. Based on past fixes, follow these rules to avoid rendering errors.
 
-## 1. Avoid Emojis in Diagrams
-While tempting for visual flair, emojis frequently cause rendering errors in various Mermaid implementations and CI/CD pipelines.
+## 1. Avoid Special Characters in Identifiers
+Do not use spaces or emojis in the node identifiers (the part inside the brackets or the variable name).
 
-**Rule:** Do NOT use emojis in node identifiers, labels, or subgraph names.
+❌ **Bad:**
+`graph TD; 🚀Start --> |Files| 🛠Processor`
 
-### Bad Practice (Prone to errors)
-```mermaid
-graph TD
-    A[User 👤] --> B{Valid? ✅}
-    B -->|Yes| C[App 📱]
-    B -->|No| D[Error ❌]
-```
+✅ **Good:**
+`graph TD; Start[🚀 Start] --> |Files| Processor[🛠 Processor]`
 
-### Good Practice (Stable)
-```mermaid
-graph TD
-    A[User] --> B{Valid?}
-    B -->|Yes| C[App]
-    B -->|No| D[Error]
-```
+## 2. Use Quotes for Descriptive Text
+If you want to use symbols or spaces in the displayed text, wrap it in brackets and quotes.
 
-## 2. Use Simple Alphanumeric IDs
-Node identifiers (the internal names used to link nodes) should be simple, short, and alphanumeric. Avoid spaces or special characters in the ID itself.
+`NodeA["My App (v1.0)"]`
 
-**Bad:**
-`User Input --> Database Connection`
-(Using the label as the ID can be ambiguous and break if labels change)
+## 3. Direction Consistency
+Standardize on `graph TD` (Top Down) for architecture and `graph LR` (Left to Right) for sequence-like flows.
 
-**Good:**
-`user_input[User Input] --> db_conn[Database Connection]`
-
-## 3. Escape Special Characters
-If you must use special characters (like brackets `[]`, parentheses `()`, or quotes `""`) inside a label, ensure they are properly escaped or use the correct enclosure syntax.
-
-- **Square Brackets**: `id[Text with [brackets]]` can break. Use `id["Text with [brackets]"]`.
-- **Quotations**: `id[Text "quote"]` can break. Use `id['Text "quote"']` or `id["Text 'quote'"]`.
-
-## 4. Direction
-Stick to standard directions unless necessary:
-- `TD` (Top-Down) or `LR` (Left-Right) are the most common and readable.
-
-## 5. Subgraphs
-When using subgraphs, ensure the ID is unique and does not conflict with node IDs.
-
-```mermaid
-subgraph sg_core [Core System]
-    direction TB
-    ...
-end
-```
-
-## Summary Checklist
-- [ ] No emojis in any part of the diagram.
-- [ ] Node IDs are alphanumeric (e.g., `A`, `client_service`).
-- [ ] Labels with special characters are wrapped in quotes.
-- [ ] Diagram direction is appropriate (`TD` or `LR`).
+## 4. Troubleshooting
+If a README diagram is broken:
+- Check for unclosed parentheses `(` or brackets `[` .
+- Ensure there are no reserved words used as node IDs (e.g., `end`, `subgraph` without indentation).
+- Test the syntax in the [Mermaid Live Editor](https://mermaid.live/) before committing.
